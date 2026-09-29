@@ -14,6 +14,7 @@
 | `zemismart_zm86_2z.js` | `TS0601` | `_TZE200_cf1sl3tj` | ZM86-2Z 罗马杆 I/U 型窗帘电机，外部转换器精确指纹优先匹配；支持开关停、DP2 位置、电机方向、限位、点动、电量和故障状态，并将语义未确认的 DP3 保留为只读诊断值，避免覆盖位置和运行状态 |
 | `zemismart-zpm1-z2m.js` | `TS0601` | `_TZE284_6hrnp30w` | ZMP1 电池窗帘电机，支持开关停、位置、方向、限位和每 12 小时通过 Tuya dataQuery 主动读取电量 |
 | `zemismart-zps-z1-z2m.js` | `TS0601` | `_TZE284_ft7qqpx3` | ZPS-Z1 24 GHz 毫米波人体存在传感器；精确指纹、精简默认界面、可选高级设置；距离参数按厂家协议，能量命令带显式关闭保护 |
+| [`zemismart_ts1201_ir.mjs`](zemismart_ts1201_ir.mjs) | `TS1201` | `_TZ3290_qazgdsae` | 红外遥控器 1.3.0 试点方案；本地空调品牌匹配、已匹配码库的日常控制、命名自学习按键及 HA MQTT 控件；须同时安装码库和许可证，见下文 |
 | `zemismart_zmr4.js` | `TS0044` | `_TZ3000_xwuveizv` | ZMR4 四键无线遥控器，支持每键单击、双击、长按动作、电池/电压及 12 个本地动作模拟按钮；精确指纹优先于上游定义 |
 | `zm25z.js` | `TS0301` | `_TZE200_cirjrpxe` | ZM25Z 强电窗帘电机，支持开关停、位置、方向和限位设置 |
 | `zms1.js` | `TS0601` | `_TZE284_zuq5xxib`, `_TZE200_fu14oapz` | ZMS1-TYZ 窗帘电机，支持开关停、整数百分比及运行指示；284 版本另提供方向和原始速度设置，fu14oapz 版本另提供 DP7/DP12 原始诊断。实测范围与限制见下文 |
@@ -21,6 +22,14 @@
 | `zm208.js` | `TS0601` | 3 路: `_TZE284_xvywzhmi`, `_TZE28C1000000_xvywzhmi` | ZMS-208US-3 非调光屏显开关，支持每路开关、倒计时、屏显名称和童锁；带重复 DP 去重、MCU 时间同步节流及 `0xE000` 私有状态应答 |
 | `zms206.js` | `TS0601` | 1 路: `_TZE204_lnyz4a6v`, `_TZE204_sa2ueffe`, `_TZE204_zuepxzck`, `_TZE28C1000000_lnyz4a6v`, `_TZE284_lnyz4a6v`, `_TZE284_1tnysxwl`, `_TZE284_sa2ueffe`, `_TZE284_rzdkn5rx`<br>2 路: `_TZE204_3ctwoaip`, `_TZE204_dmckrsxg`, `_TZE28C1000000_dmckrsxg`, `_TZE284_3ctwoaip`, `_TZE284_dmckrsxg`, `_TZE284_a2teqi5u`, `_TZE28C1000000_a2teqi5u`<br>3 路: `_TZE204_e4pf6l87`, `_TZE204_k7v0eqke`, `_TZE204_iyki9kjp`, `_TZE284_k7v0eqke`, `_TZE284_e4pf6l87`, `_TZE28C1000000_e4pf6l87`<br>4 路: `_TZE204_y4jqpry8`, `_TZE284_y4jqpry8`, `_TZE28C1000000_y4jqpry8`, `by _TZE28C1000000_y4jqpry8`, `_TZE204_wwaeqnrf`, `_TZE284_wwaeqnrf`, `_TZE204_xibaabmu`, `_TZE284_xibaabmu`, `_TZE28C1000000_xibaabmu`, `_TZE204_08qc13ct` | ZMS206 屏显开关，支持每路开关、屏显名称、倒计时、继电器上电状态、背光、童锁、指示灯颜色和循环计划；带 MCU 时间同步节流、重复状态去重、`0xE000`/`0xFC03` 私有报文兼容及四路 DP112–DP114 诊断保留 |
 | `zmz609.js` | `ZMZ609-2`, `ZMZ609-3` | 2 路: `_TZE284_o409r73p`, `_TZE28C1000000_o409r73p`<br>3 路: `_TZE284_oy1nuaa5` | ZMZ609 美标屏显开关，支持两路/三路开关、计量、屏显和配置项；自动同步日期、当前天气和三天天气预报，无需 Home Assistant 自动化，可自动定位或配置经纬度 |
+
+## TS1201 红外遥控器
+
+仅匹配 `TS1201 / _TZ3290_qazgdsae`。下载仓库后，将根目录的 `zemismart_ts1201_ir.mjs`、`ts1201-ir-codebooks.json` 和 `ts1201-ir-codebooks-LICENSE.txt` 作为完整一套安装：码库和许可证放入实际 Z2M 数据目录的 `external_converters/`，再通过 Z2M 外部转换器入口保存并加载 `.mjs`。三个文件必须同目录，不能只安装转换器。
+
+1.3.0 提供按品牌逐套试机、用户确认保存后生成空调控件，以及命名学习、保存、发送、改名、删除和撤销。停止学习、失败提示、完整传输确认和无效控件显示已修正；空调面板显示命令估计，设备传输完成仍需观察家电实际响应。
+
+安装和回滚见[安装维护说明](docs/ts1201_z2m_installation.md)，客户操作见[使用指南](docs/ts1201_z2m_customer_guide.md)，版本与测试范围见[验证记录](docs/ts1201_validation.md)。本方案供工程人员部署试点；ZHC 26.105.0 / 26.109.0 各 69 项软件回归通过，1.3.0 已在 Z2M 2.14.1 / ZHC 26.105.0 实际服务热加载。2026-09-28 验证时目标设备配对 ZHA，1.3.0 未做 Z2M 实机重测；历史物理证据仅覆盖小米/米家码库的一次制冷 26℃、自动风响应，不代表全部家电、档位、自学习或断电恢复通过。
 
 ## ZPS-Z1 匹配、设置与升级说明
 
