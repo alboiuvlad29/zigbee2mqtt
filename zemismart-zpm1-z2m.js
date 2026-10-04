@@ -126,7 +126,7 @@ const tzLocal = {
             const ieee = meta.device.ieeeAddr;
             lastCommand.set(ieee, Date.now());
             const result = await tuya.tz.datapoints.convertSet(entity, key, value, meta);
-            if (Number(value) === Number(meta.state?.position)) targets.delete(ieee);
+            if (!motions.has(ieee) && Number(value) === Number(meta.state?.position)) targets.delete(ieee);
             else targets.set(ieee, Number(value));
             return result;
         },
