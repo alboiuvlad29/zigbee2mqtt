@@ -16,7 +16,7 @@ const DEFAULT_TRAVEL_MS = 60000;
 // DP3 only arrives at the end of a move, so the position is estimated meanwhile.
 // DP10 is not the real travel time after a speed change, so real times are learned
 // per direction and per DP10 value in `travel_profiles`.
-const ESTIMATE_INTERVAL_MS = 2000;
+const ESTIMATE_INTERVAL_MS = 1000;
 const MIN_SAMPLE_DISTANCE = 30;
 const MAX_SAMPLE_FACTOR = 4;
 const MAX_PROFILES = 8;
@@ -97,6 +97,9 @@ const armMotionTimer = (meta, publish, timeTotal = meta.state?.time_total) => {
         travelTime(meta.state, 'closing', timeTotal),
     ) || DEFAULT_TRAVEL_MS;
     const timer = setTimeout(() => {
+        // The real stop time is unknown, so this move must not be learned from
+        const motion = motions.get(ieee);
+        if (motion) motion.valid = false;
         clearMotion(ieee);
         logger.warning(`${ieee} no stop signal after ${travel + STOP_MARGIN_MS} ms, marking stopped`, NS);
         publish({ motor_state: 'stopped' });
