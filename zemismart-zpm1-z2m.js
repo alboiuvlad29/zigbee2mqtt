@@ -40,12 +40,19 @@ const isStatusDump = (ieee, msg) => {
     const recentCommand = Date.now() - (lastCommand.get(ieee) || 0) < 5000;
     if (recentCommand) return false;
     const withPosition = msg?.data?.dpValues?.some((dp) => dp.dp === 3);
-    const recentPosition = Date.now() - (lastPositionReport.get(ieee) || 0) < 2000;
+    const recentPosition = Date.now() - (lastPositionReport.get(ieee) || 0) < 500;
     return withPosition || recentPosition;
 };
 
+const activeMotion = (ieee) => {
+    const motion = motions.get(ieee);
+    return motion && !motion.ended ? motion : undefined;
+};
+
+// Ended motions are kept briefly so a DP3 that follows DP1 STOP or DP11 can still be learned from
 const clearMotion = (ieee) => {
-    motions.delete(ieee);
+    const motion = motions.get(ieee);
+    if (motion && !motion.ended) Object.assign(motion, { ended: true, endedAt: Date.now() });
     clearTimeout(motionTimers.get(ieee));
     motionTimers.delete(ieee);
     clearInterval(estimators.get(ieee)?.interval);
@@ -126,7 +133,7 @@ const tzLocal = {
             const ieee = meta.device.ieeeAddr;
             lastCommand.set(ieee, Date.now());
             const result = await tuya.tz.datapoints.convertSet(entity, key, value, meta);
-            if (!motions.has(ieee) && Number(value) === Number(meta.state?.position)) targets.delete(ieee);
+            if (!activeMotion(ieee) && Number(value) === Number(meta.state?.position)) targets.delete(ieee);
             else targets.set(ieee, Number(value));
             return result;
         },
@@ -253,9 +260,10 @@ const definition = {
                     estimators.delete(ieee);
                     const motion = motions.get(ieee);
                     motions.delete(ieee);
+                    const endedAt = motion?.endedAt ?? Date.now();
                     const distance = motion ? Math.abs(value - motion.startPosition) : 0;
-                    if (motion?.valid && distance >= MIN_SAMPLE_DISTANCE) {
-                        const sample = (Date.now() - motion.startedAt) / distance * 100;
+                    if (motion?.valid && Date.now() - endedAt < 3000 && distance >= MIN_SAMPLE_DISTANCE) {
+                        const sample = (endedAt - motion.startedAt) / distance * 100;
                         const timeTotal = Number(meta.state?.time_total);
                         const plausible = !timeTotal ||
                             (sample >= timeTotal / MAX_SAMPLE_FACTOR && sample <= timeTotal * MAX_SAMPLE_FACTOR);
@@ -305,7 +313,7 @@ const definition = {
                         motorState,
                         startedAt: Date.now(),
                         startPosition: Number(meta.state?.position),
-                        valid: !motions.has(ieee) && Number.isFinite(Number(meta.state?.position)),
+                        valid: !activeMotion(ieee) && Number.isFinite(Number(meta.state?.position)),
                     });
                     armMotionTimer(meta, publish);
                     startEstimate(meta, publish, motorState);
@@ -319,7 +327,7 @@ const definition = {
                 from: (value, meta, options, publish) => {
                     const ieee = meta.device.ieeeAddr;
                     const previous = meta.state?.time_total;
-                    const motion = motions.get(ieee);
+                    const motion = activeMotion(ieee);
                     if (motion && previous != null && value !== Number(previous)) {
                         // Speed changed mid-move: carry on from the current estimate at the
                         // new speed, restart the stop fallback, and don't learn from this move
