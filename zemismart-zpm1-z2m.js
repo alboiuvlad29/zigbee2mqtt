@@ -9,24 +9,15 @@ const NS = 'zhc:zmp1';
 // Ask the motor for all datapoints every 12 h (battery otherwise rarely reports)
 const QUERY_INTERVAL_SECONDS = 12 * 60 * 60;
 
-// The motor reports DP7 opening/closing when it starts, then DP3 (final position)
-// and DP1 STOP about a second apart when it stops. DP1 STOP is the main stopped
-// signal; 0/100, the requested target, a limit (DP11), a STOP command and the
-// calibrated travel time plus a margin are backups.
+// DP1 STOP ends a move; the travel time plus this margin is the fallback
 const STOP_MARGIN_MS = 10000;
-// Only used until the motor has reported its travel time (DP10)
 const DEFAULT_TRAVEL_MS = 60000;
 
-// The motor only reports its position when it stops, so while moving the
-// position is estimated from the travel time. The motor rescales DP10 whenever
-// its speed is changed, but the rescaled value is not the real travel time, and
-// opening and closing can differ. So the real times are learned per direction
-// from moves of at least MIN_SAMPLE_DISTANCE % (DP7 start to the final DP3) and
-// kept per speed in `travel_profiles`, keyed by the DP10 value the motor reports
-// for that speed. Nothing is assumed about the speeds themselves.
+// DP3 only arrives at the end of a move, so the position is estimated meanwhile.
+// DP10 is not the real travel time after a speed change, so real times are learned
+// per direction and per DP10 value in `travel_profiles`.
 const ESTIMATE_INTERVAL_MS = 2000;
 const MIN_SAMPLE_DISTANCE = 30;
-// A sample further than this factor from DP10 is a glitch, not a real move
 const MAX_SAMPLE_FACTOR = 4;
 const MAX_PROFILES = 8;
 const motions = new Map();
@@ -39,14 +30,12 @@ const lastPositionReport = new Map();
 const profileFor = (state, timeTotal) => state?.travel_profiles?.[String(timeTotal)] || {};
 const travelTime = (state, motorState, timeTotal = state?.time_total) =>
     Number(profileFor(state, timeTotal)[motorState]) || Number(timeTotal) || 0;
-// travel_time_opening/closing always show the current speed's times
 const profileState = (state, timeTotal) => ({
     travel_time_opening: travelTime(state, 'opening', timeTotal) || null,
     travel_time_closing: travelTime(state, 'closing', timeTotal) || null,
 });
 
-// A DP7 in a status dump (12 h query, rejoin) arrives with a DP3 and no command;
-// it is the last motion, not a new one, so it must not show opening/closing.
+// A DP7 in a status dump (query, rejoin) is the last motion, not a new one
 const isStatusDump = (ieee, msg) => {
     const recentCommand = Date.now() - (lastCommand.get(ieee) || 0) < 5000;
     if (recentCommand) return false;
@@ -64,7 +53,6 @@ const clearMotion = (ieee) => {
     targets.delete(ieee);
 };
 
-// `from` lets a speed change mid-move carry on from the current estimate
 const startEstimate = (meta, publish, motorState, from = {}) => {
     const ieee = meta.device.ieeeAddr;
     clearInterval(estimators.get(ieee)?.interval);
@@ -73,9 +61,7 @@ const startEstimate = (meta, publish, motorState, from = {}) => {
     const start = from.position ?? Number(meta.state?.position);
     if (!travel || !Number.isFinite(start)) return;
     const sign = motorState === 'opening' ? 1 : -1;
-    // The target is read on every tick so a new command mid-move (e.g. a second
-    // swipe) moves the end point; a target behind us means full travel until the
-    // motor reverses and sends a new DP7.
+    // Read each tick so a new command mid-move moves the end point
     const endFor = () => {
         const target = targets.get(ieee);
         if (target === undefined || (target - start) * sign <= 0) return sign > 0 ? 100 : 0;
@@ -87,7 +73,6 @@ const startEstimate = (meta, publish, motorState, from = {}) => {
         const moved = (Date.now() - startedAt) / travel * 100;
         const end = endFor();
         let estimate = sign > 0 ? Math.min(start + moved, end) : Math.max(start - moved, end);
-        // Never step backwards against the direction of travel
         const last = estimator.position;
         estimate = sign > 0 ? Math.max(estimate, last) : Math.min(estimate, last);
         if (Math.round(estimate) !== Math.round(last)) publish({ position: Math.round(estimate) });
@@ -97,7 +82,6 @@ const startEstimate = (meta, publish, motorState, from = {}) => {
     estimators.set(ieee, estimator);
 };
 
-// Restarted from now when the speed changes, so slowing down mid-move can't trigger it
 const armMotionTimer = (meta, publish, timeTotal = meta.state?.time_total) => {
     const ieee = meta.device.ieeeAddr;
     clearTimeout(motionTimers.get(ieee));
@@ -114,8 +98,7 @@ const armMotionTimer = (meta, publish, timeTotal = meta.state?.time_total) => {
     motionTimers.set(ieee, timer);
 };
 
-// A single-value enum is shown as a button in Home Assistant (one press = one
-// command) instead of a dropdown that keeps the last chosen value
+// Single-value enums show as buttons in Home Assistant
 const pressButton = (name, description) => e.enum(name, ea.SET, ['press']).withDescription(description);
 const buttonDatapoint = (dp, name, value) => [dp, name, { from: null, to: () => tuya.enum(value) }, { optimistic: false }];
 
@@ -123,7 +106,6 @@ const stateLookup = { OPEN: tuya.enum(0), STOP: tuya.enum(1), CLOSE: tuya.enum(2
 const stateFromDp = { 0: 'OPEN', 1: 'STOP', 2: 'CLOSE' };
 
 const tzLocal = {
-    // Marks the motor stopped as soon as HA sends STOP
     state: {
         key: ['state'],
         convertSet: async (entity, key, value, meta) => {
@@ -133,21 +115,17 @@ const tzLocal = {
                 clearMotion(meta.device.ieeeAddr);
                 result.state = { ...result.state, motor_state: 'stopped' };
             } else {
-                // OPEN/CLOSE go to the end stop; an earlier position target no longer applies
                 targets.delete(meta.device.ieeeAddr);
             }
             return result;
         },
     },
-    // The target is only recorded once the command was sent, so a failed send
-    // can't leave a target for a move that never started
     position: {
         key: ['position'],
         convertSet: async (entity, key, value, meta) => {
             const ieee = meta.device.ieeeAddr;
             lastCommand.set(ieee, Date.now());
             const result = await tuya.tz.datapoints.convertSet(entity, key, value, meta);
-            // Same as the current position: the motor won't move or report anything
             if (Number(value) === Number(meta.state?.position)) targets.delete(ieee);
             else targets.set(ieee, Number(value));
             return result;
@@ -271,7 +249,6 @@ const definition = {
                     lastPositionReport.set(ieee, Date.now());
                     logger.debug(`${ieee} DP3 position=${value} target=${target} motor=${meta.state?.motor_state}`, NS);
                     const result = { position: value };
-                    // The real position wins: a pending estimator tick must not overwrite it
                     clearInterval(estimators.get(ieee)?.interval);
                     estimators.delete(ieee);
                     const motion = motions.get(ieee);
@@ -288,7 +265,6 @@ const definition = {
                             const profile = { ...profiles[key] };
                             const learned = Number(profile[motion.motorState]);
                             profile[motion.motorState] = Math.round(learned ? (learned + sample) / 2 : sample);
-                            // Most recently used speed last; drop the oldest beyond MAX_PROFILES
                             delete profiles[key];
                             profiles[key] = profile;
                             for (const old of Object.keys(profiles).slice(0, -MAX_PROFILES)) delete profiles[old];
@@ -324,7 +300,6 @@ const definition = {
                     const dump = isStatusDump(meta.device.ieeeAddr, msg);
                     logger.debug(`${meta.device.ieeeAddr} DP7 ${motorState} type=${msg?.type} statusDump=${dump}`, NS);
                     if (dump) return {};
-                    // A DP7 during a motion is a reversal; that move can't be measured
                     const ieee = meta.device.ieeeAddr;
                     motions.set(ieee, {
                         motorState,
