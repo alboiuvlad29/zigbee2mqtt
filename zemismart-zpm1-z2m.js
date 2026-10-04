@@ -273,9 +273,10 @@ const definition = {
                             const profile = { ...profiles[key] };
                             const learned = Number(profile[motion.motorState]);
                             profile[motion.motorState] = Math.round(learned ? (learned + sample) / 2 : sample);
-                            delete profiles[key];
+                            profile.used = Date.now();
                             profiles[key] = profile;
-                            for (const old of Object.keys(profiles).slice(0, -MAX_PROFILES)) delete profiles[old];
+                            const oldest = Object.keys(profiles).sort((x, y) => profiles[y].used - profiles[x].used);
+                            for (const old of oldest.slice(MAX_PROFILES)) delete profiles[old];
                             result.travel_profiles = profiles;
                             result[`travel_time_${motion.motorState}`] = profile[motion.motorState];
                             logger.debug(`${ieee} ${motion.motorState} sample ${Math.round(sample)} ms over ${distance}% at speed ${key}, learned ${profile[motion.motorState]}`, NS);
