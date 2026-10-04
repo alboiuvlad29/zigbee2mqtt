@@ -132,7 +132,24 @@ const tzLocal = {
             if (String(value).toUpperCase() === 'STOP') {
                 clearMotion(meta.device.ieeeAddr);
                 result.state = { ...result.state, motor_state: 'stopped' };
+            } else {
+                // OPEN/CLOSE go to the end stop; an earlier position target no longer applies
+                targets.delete(meta.device.ieeeAddr);
             }
+            return result;
+        },
+    },
+    // The target is only recorded once the command was sent, so a failed send
+    // can't leave a target for a move that never started
+    position: {
+        key: ['position'],
+        convertSet: async (entity, key, value, meta) => {
+            const ieee = meta.device.ieeeAddr;
+            lastCommand.set(ieee, Date.now());
+            const result = await tuya.tz.datapoints.convertSet(entity, key, value, meta);
+            // Same as the current position: the motor won't move or report anything
+            if (Number(value) === Number(meta.state?.position)) targets.delete(ieee);
+            else targets.set(ieee, Number(value));
             return result;
         },
     },
@@ -152,7 +169,7 @@ const definition = {
         queryOnDeviceAnnounce: true,
         queryIntervalSeconds: QUERY_INTERVAL_SECONDS,
     })],
-    toZigbee: [tzLocal.state],
+    toZigbee: [tzLocal.state, tzLocal.position],
     onEvent: tuya.onEventSetTime,
     exposes: [
         // Core cover
@@ -244,14 +261,7 @@ const definition = {
             [1, 'state', tuya.valueConverterBasic.lookup(stateLookup)],
 
             // DP2 — position setpoint (write only); not optimistic so HA shows the motion
-            [2, 'position', {
-                from: null,
-                to: (value, meta) => {
-                    targets.set(meta.device.ieeeAddr, value);
-                    lastCommand.set(meta.device.ieeeAddr, Date.now());
-                    return value;
-                },
-            }, { optimistic: false }],
+            [2, 'position', { from: null, to: (value) => value }, { optimistic: false }],
 
             // DP3 — actual position report
             [3, null, {
@@ -261,6 +271,9 @@ const definition = {
                     lastPositionReport.set(ieee, Date.now());
                     logger.debug(`${ieee} DP3 position=${value} target=${target} motor=${meta.state?.motor_state}`, NS);
                     const result = { position: value };
+                    // The real position wins: a pending estimator tick must not overwrite it
+                    clearInterval(estimators.get(ieee)?.interval);
+                    estimators.delete(ieee);
                     const motion = motions.get(ieee);
                     motions.delete(ieee);
                     const distance = motion ? Math.abs(value - motion.startPosition) : 0;
